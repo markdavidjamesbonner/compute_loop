@@ -25,21 +25,27 @@ export const LevelMap: React.FC<LevelMapProps> = ({ unlockedLevel, onSelectLevel
 
   return (
     <div className="flex flex-col items-center bg-slate-100 p-6 w-full min-h-screen">
-        <h1 className="text-4xl font-extrabold text-slate-900 mb-2 shrink-0">
-            jake's wicked function solving game
+        <h1 className="text-4xl font-extrabold text-red-500 mt-10 mb-5 shrink-0">
+            functions and callbacks - a solving game
         </h1>
-        <p className="text-slate-500 mb-8 shrink-0">execute the code - become the computer.</p>
+
+        <p className="text-green-500 mb-8 shrink-0 font-bold">
+            execute the code - become the computer.
+        </p>
 
         <div className="relative w-full max-w-md pb-20" ref={scrollRef}>
-            <div className="flex flex-wrap justify-center gap-4">
+            <div
+                className="grid gap-3 justify-center mx-auto"
+                style={{ gridTemplateColumns: 'repeat(5, auto)' }}
+            >
                 {levels.map((lvl) => {
                     const isLocked = lvl > unlockedLevel;
                     const isCompleted = lvl < unlockedLevel;
                     const isCurrent = lvl === unlockedLevel;
 
                     let bgClass = "bg-gray-300";
-                    if (isCompleted) bgClass = "bg-emerald-500 hover:bg-emerald-600";
-                    if (isCurrent) bgClass = "bg-amber-400 hover:bg-amber-500 animate-pulse-slow";
+                    if (isCompleted) bgClass = "bg-green-500 hover:bg-green-600";
+                    if (isCurrent) bgClass = "bg-blue-400 hover:bg-blue-500 animate-pulse-slow";
                     if (isLocked) bgClass = "bg-slate-200";
 
                     return (
@@ -49,21 +55,21 @@ export const LevelMap: React.FC<LevelMapProps> = ({ unlockedLevel, onSelectLevel
                             onClick={() => onSelectLevel(lvl)}
                             className={`
                                 w-16 h-16 rounded-full flex items-center justify-center
-                                text-white font-bold text-xl shadow-md transition-all
+                                text-white font-bold text-base shadow-md transition-all
                                 transform hover:scale-105 active:scale-95
                                 ${bgClass}
                                 ${isLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
                             `}
                         >
                             {isLocked ? (
-                                <Lock className="w-6 h-6 text-slate-400" />
+                                <Lock className="w-4 h-4 text-slate-400" />
                             ) : isCompleted ? (
                                 <span className="flex flex-col items-center">
-                                    <span className="text-sm opacity-80">{lvl + 1}</span>
-                                    <Check className="w-5 h-5" />
+                                    <span className="text-xs opacity-80">{lvl + 1}</span>
+                                    <Check className="w-3 h-3" />
                                 </span>
                             ) : (
-                                <span className="text-white drop-shadow-md">{lvl + 1}</span>
+                                <span className="text-white drop-shadow-md text-sm">{lvl + 1}</span>
                             )}
                         </button>
                     );
@@ -71,8 +77,8 @@ export const LevelMap: React.FC<LevelMapProps> = ({ unlockedLevel, onSelectLevel
             </div>
         </div>
 
-        <div className="text-slate-400 text-sm shrink-0 pb-6">
-            Procedurally generated endless levels
+        <div className="text-slate-900 shrink-0 pb-6">
+            procedurally generated endless levels - you win 'em and bin 'em, they'll keep comin' at ya.
         </div>
     </div>
   );

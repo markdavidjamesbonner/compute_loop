@@ -47,14 +47,14 @@ const checkPath = (x: number, y: number, moves: Direction[]): { valid: boolean; 
 
 export const generateLevel = (levelIndex: number): LevelData => {
   nodeIdCounter = 0;
-  
+
   // Accelerated Difficulty:
   // Level 0: Intro (Linear)
   // Level 1-2: Simple Loops
   // Level 3-5: Multi-action Loops
   // Level 6+: Conditionals + Loops
-  const difficulty = levelIndex; 
-  
+  const difficulty = levelIndex;
+
   const startX = Math.floor(Math.random() * (COLS - 2)) + 1;
   const startY = Math.floor(Math.random() * (ROWS - 2)) + 1;
 
@@ -78,7 +78,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
   while (stepsGenerated < targetSteps && attempts < 100) {
     attempts++;
     const remaining = targetSteps - stepsGenerated;
-    
+
     // Feature flags based on difficulty
     const allowLoop = difficulty >= 1 && remaining >= 3;
     const allowMultiStepLoop = difficulty >= 3 && remaining >= 4;
@@ -88,25 +88,25 @@ export const generateLevel = (levelIndex: number): LevelData => {
     const rand = Math.random();
 
     // --- TRY GENERATING A LOOP ---
-    if (allowLoop && rand < 0.7) { 
+    if (allowLoop && rand < 0.7) {
         const loopCount = Math.floor(Math.random() * 3) + 2; // 2 to 4 iterations
         const bodyLength = (allowMultiStepLoop && Math.random() > 0.5) ? 2 : 1;
-        
+
         if (remaining < loopCount * bodyLength) {
              // Not enough steps for this specific loop, try simpler move next iteration
-             continue; 
+             continue;
         }
 
         // We need to find a sequence of `bodyLength` moves that can be repeated `loopCount` times
         // Brute force search for a valid sequence
         let bestSequence: Direction[] | null = null;
-        
+
         for(let t=0; t<20; t++) { // 20 trials to find a valid loop body
             const candidateSeq: Direction[] = [];
             // Generate random candidate sequence
             let cx = simState.x; // temp vars for generation only
             let cy = simState.y;
-            
+
             // Note: We don't check validity deep here, we check validity of the *Repeated* sequence below
             // But we should pick valid single moves to increase success rate
             let tempSeqValid = true;
@@ -127,7 +127,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
             // We must reset to actual simState start for the check
             const fullSequence: Direction[] = [];
             for(let k=0; k<loopCount; k++) fullSequence.push(...candidateSeq);
-            
+
             const check = checkPath(simState.x, simState.y, fullSequence);
             if (check.valid) {
                 bestSequence = candidateSeq;
@@ -155,7 +155,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
                     const dir = bestSequence[b];
                     // Find the child node ID corresponding to this action in the loop body
                     const actionNodeId = loopNode.children![b].id;
-                    
+
                     simState.trace.push({
                         key: dir,
                         nodeId: actionNodeId,
@@ -175,10 +175,10 @@ export const generateLevel = (levelIndex: number): LevelData => {
     if (allowConditional && rand > 0.6) {
         // if (Blue) { A } else { B }
         // We force the condition to be true (or false) by painting the grid
-        
+
         // Find two valid distinct moves if possible
         const validMoves = DIRECTIONS.filter(d => isValidPos(movePos(simState.x, simState.y, d).x, movePos(simState.x, simState.y, d).y));
-        
+
         if (validMoves.length >= 1) {
             const chosenMove = validMoves[Math.floor(Math.random() * validMoves.length)];
             // Pick a different move for the 'else' branch if possible, otherwise just a random one (gameplay wise it doesn't matter if we don't take it, but visually better if distinct)
@@ -186,7 +186,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
 
             const conditionColor = Math.random() > 0.5 ? GridColor.Blue : GridColor.Red;
             const takeTrueBranch = Math.random() > 0.5;
-            
+
             // Paint the cell
             const key = `${simState.x},${simState.y}`;
             if (takeTrueBranch) {
@@ -200,7 +200,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
                     // It was already painted the condition color! We must overwrite or pick different logic.
                     // For simplicity, let's force the branch that matches the EXISTING color if it exists.
                     // (Skipping complex existing color logic for this demo, just overwriting is safest for generator)
-                    simState.gridColors[key] = GridColor.None; 
+                    simState.gridColors[key] = GridColor.None;
                 }
             }
 
@@ -218,7 +218,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
             // Update Sim State
             const actualMove = takeTrueBranch ? chosenMove : otherMove;
             const activeNodeIndex = takeTrueBranch ? 0 : 1;
-            
+
             simState.trace.push({
                 key: actualMove,
                 nodeId: ifNode.children![activeNodeIndex].id,
@@ -239,7 +239,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
     });
 
     if (validMoves.length === 0) break; // Trapped
-    
+
     const move = validMoves[Math.floor(Math.random() * validMoves.length)];
     const actionNode: CodeNode = {
         id: generateId(),
@@ -247,7 +247,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
         action: ACTION_NAMES[move]
     };
     rootNode.children?.push(actionNode);
-    
+
     simState.trace.push({
         key: move,
         nodeId: actionNode.id,
@@ -269,6 +269,74 @@ export const generateLevel = (levelIndex: number): LevelData => {
       currX = next.x;
       currY = next.y;
   }
+
+  // Collect all conditional colors from the code tree
+  const conditionalColors = new Set<GridColor>();
+  const collectConditionalColors = (node: CodeNode) => {
+    if (node.type === 'conditional' && node.conditionColor) {
+      conditionalColors.add(node.conditionColor);
+    }
+    node.children?.forEach(collectConditionalColors);
+  };
+  collectConditionalColors(rootNode);
+
+  // Populate grid with colors
+  // Save existing colors (set during conditional generation) - these are important for logic
+  const existingColors = { ...simState.gridColors };
+
+  const allColors = [GridColor.Red, GridColor.Blue, GridColor.Yellow, GridColor.Green];
+  const totalCells = COLS * ROWS;
+
+  // Calculate how many cells should have colors (30-50% of grid)
+  const colorDensity = 0.3 + (Math.random() * 0.2); // 30-50%
+  const cellsToColor = Math.floor(totalCells * colorDensity);
+
+  // Get all cell positions
+  const allPositions: Array<{ x: number; y: number }> = [];
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      allPositions.push({ x, y });
+    }
+  }
+
+  // Shuffle positions
+  for (let i = allPositions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allPositions[i], allPositions[j]] = [allPositions[j], allPositions[i]];
+  }
+
+  // Ensure conditional colors appear at least once somewhere on the grid
+  const conditionalColorArray = Array.from(conditionalColors);
+  let positionIndex = 0;
+  for (const color of conditionalColorArray) {
+    // Find a position that doesn't have an existing color (to preserve logic)
+    while (positionIndex < allPositions.length) {
+      const pos = allPositions[positionIndex];
+      const key = `${pos.x},${pos.y}`;
+      if (!existingColors[key] || existingColors[key] === GridColor.None) {
+        simState.gridColors[key] = color;
+        positionIndex++;
+        break;
+      }
+      positionIndex++;
+    }
+  }
+
+  // Fill remaining positions with random colors, but preserve existing colors
+  let coloredCount = Object.keys(existingColors).filter(k => existingColors[k] !== GridColor.None).length;
+  for (let i = 0; i < allPositions.length && coloredCount < cellsToColor; i++) {
+    const pos = allPositions[i];
+    const key = `${pos.x},${pos.y}`;
+    // Only set if not already set (preserve conditional logic colors)
+    if (!existingColors[key] || existingColors[key] === GridColor.None) {
+      const randomColor = allColors[Math.floor(Math.random() * allColors.length)];
+      simState.gridColors[key] = randomColor;
+      coloredCount++;
+    }
+  }
+
+  // Merge back existing colors (these override random colors for logic correctness)
+  Object.assign(simState.gridColors, existingColors);
 
   return {
     id: levelIndex,

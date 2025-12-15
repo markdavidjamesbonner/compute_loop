@@ -5,9 +5,12 @@ import { generateLevel } from './services/levelGenerator';
 import { LevelData } from './types';
 
 function App() {
-  const [gameState, setGameState] = useState<'map' | 'playing'>('map');
-  const [unlockedLevel, setUnlockedLevel] = useState(0);
-  const [currentLevelId, setCurrentLevelId] = useState(0);
+    const [gameState, setGameState] = useState<'map' | 'playing'>('map');
+
+    // Set to high number to unlock all levels for testing
+    const [unlockedLevel, setUnlockedLevel] = useState(3);
+
+    const [currentLevelId, setCurrentLevelId] = useState(0);
 
   // Memoize level data so it doesn't regenerate on every render, only when ID changes
   // In a real app, we might store generated levels to avoid them changing if user re-enters same ID.
@@ -43,6 +46,7 @@ function App() {
       {gameState === 'map' ? (
         <LevelMap
             unlockedLevel={unlockedLevel}
+            selectedLevel={currentLevelId}
             onSelectLevel={loadLevel}
         />
       ) : (

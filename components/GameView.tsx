@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { LevelData } from "../types";
+import { LevelData, CodeNode, GridColor } from "../types";
 import { Grid } from "./Grid";
 import { CodeDisplay } from "./CodeDisplay";
 import { ArrowLeft, RefreshCw, Home } from "lucide-react";
@@ -33,6 +33,22 @@ export const GameView: React.FC<GameViewProps> = ({
     resetLevel();
   }, [level.id, resetLevel]);
 
+  // Helper to find conditional parent of a node
+  const findConditionalParent = (nodeId: string, node: CodeNode): CodeNode | null => {
+    if (node.type === 'conditional' && node.children) {
+      if (node.children[0]?.id === nodeId || node.children[1]?.id === nodeId) {
+        return node;
+      }
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        const found = findConditionalParent(nodeId, child);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (isError) return;
@@ -45,28 +61,75 @@ export const GameView: React.FC<GameViewProps> = ({
 
       const expectedStep = level.solutionTrace[stepIndex];
 
-      if (e.key === expectedStep.key) {
-        // Correct Input
-        setCursorPos({ x: expectedStep.expectedX, y: expectedStep.expectedY });
+      // Check if this step is from a conditional
+      const conditionalParent = findConditionalParent(expectedStep.nodeId, level.codeTree);
 
-        const nextIndex = stepIndex + 1;
-        setStepIndex(nextIndex);
+      if (conditionalParent && conditionalParent.conditionColor) {
+        // This is a conditional step - verify the color condition
+        const cellKey = `${cursorPos.x},${cursorPos.y}`;
+        const cellColor = level.gridColors[cellKey] || GridColor.None;
+        const conditionMet = cellColor === conditionalParent.conditionColor;
 
-        if (nextIndex >= level.solutionTrace.length) {
-          // Level Complete
+        // Determine which branch should be taken
+        const trueBranchAction = conditionalParent.children?.[0];
+        const falseBranchAction = conditionalParent.children?.[1];
+
+        // Map action names to directions
+        const ACTION_TO_DIRECTION: Record<string, string> = {
+          'up': 'ArrowUp',
+          'down': 'ArrowDown',
+          'left': 'ArrowLeft',
+          'right': 'ArrowRight'
+        };
+
+        const expectedAction = conditionMet ? trueBranchAction : falseBranchAction;
+        const expectedDirection = expectedAction?.action ? ACTION_TO_DIRECTION[expectedAction.action] : null;
+
+        if (expectedDirection && e.key === expectedDirection && e.key === expectedStep.key) {
+          // Correct Input - color condition matches and key is correct
+          setCursorPos({ x: expectedStep.expectedX, y: expectedStep.expectedY });
+
+          const nextIndex = stepIndex + 1;
+          setStepIndex(nextIndex);
+
+          if (nextIndex >= level.solutionTrace.length) {
+            // Level Complete
+            setTimeout(() => {
+              onComplete();
+            }, 300);
+          }
+        } else {
+          // Wrong Input - either color doesn't match or wrong key
+          setIsError(true);
           setTimeout(() => {
-            onComplete();
-          }, 300);
+            resetLevel();
+          }, 500);
         }
       } else {
-        // Wrong Input
-        setIsError(true);
-        setTimeout(() => {
-          resetLevel();
-        }, 500);
+        // Regular step (not a conditional)
+        if (e.key === expectedStep.key) {
+          // Correct Input
+          setCursorPos({ x: expectedStep.expectedX, y: expectedStep.expectedY });
+
+          const nextIndex = stepIndex + 1;
+          setStepIndex(nextIndex);
+
+          if (nextIndex >= level.solutionTrace.length) {
+            // Level Complete
+            setTimeout(() => {
+              onComplete();
+            }, 300);
+          }
+        } else {
+          // Wrong Input
+          setIsError(true);
+          setTimeout(() => {
+            resetLevel();
+          }, 500);
+        }
       }
     },
-    [level, stepIndex, isError, onComplete, resetLevel]
+    [level, stepIndex, isError, onComplete, resetLevel, cursorPos]
   );
 
   useEffect(() => {
@@ -103,24 +166,26 @@ export const GameView: React.FC<GameViewProps> = ({
       </div>
 
 
-      {/* Game Area */}
+      {/* 🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨 game area */}
+      {/* 🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨 */}
       <div className="flex-1 flex flex-col md:flex-row gap-8 items-center md:items-start justify-center min-h-0">
 
-        {/* Left: Code Panel */}
-        <div className="w-full md:w-3/5 bg-white rounded-xl shadow-lg p-6 overflow-y-auto border-l-4 border-yellow-400 min-h-[300px] max-h-full flex flex-col">
+        {/* 🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨 left: code panel */}
+        <div className="w-full md:w-2/3 bg-white rounded-xl shadow-lg p-6 overflow-y-auto border-l-4 border-yellow-400 min-h-[300px] max-h-full flex flex-col">
           <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 shrink-0">
-            Program
+            program
           </div>
           <div className="flex-1 overflow-y-auto min-h-0">
             <CodeDisplay node={level.codeTree} activeNodeId={activeNodeId} />
           </div>
           <div className="mt-auto pt-6 text-sm text-gray-400 text-center shrink-0">
-            Use your keyboard arrow keys to run the code.
+            use your keyboard arrow keys to call the functions.
           </div>
         </div>
 
-        {/* Right: Grid */}
-        <div className="w-full md:w-2/5 flex items-center justify-center">
+        {/* 🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨 right: grid */}
+        {/* 🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨 */}
+        <div className="w-full md:w-1/3 flex items-center justify-center">
           <Grid level={level} cursorPos={cursorPos} isError={isError} />
         </div>
 

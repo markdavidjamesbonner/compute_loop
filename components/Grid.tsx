@@ -9,7 +9,7 @@ interface GridProps {
 
 export const Grid: React.FC<GridProps> = ({ level, cursorPos, isError }) => {
   const { gridSize, gridColors } = level;
-  
+
   // Create grid cells
   const cells = [];
   for (let y = 0; y < gridSize.rows; y++) {
@@ -21,20 +21,20 @@ export const Grid: React.FC<GridProps> = ({ level, cursorPos, isError }) => {
   }
 
   return (
-    <div 
+    <div
       className={`grid gap-3 p-4 bg-white rounded-xl shadow-sm transition-transform duration-300 ${isError ? 'animate-shake' : ''}`}
-      style={{ 
-        gridTemplateColumns: `repeat(${gridSize.cols}, minmax(0, 1fr))`,
+      style={{
+        gridTemplateColumns: `repeat(5, minmax(0, 1fr))`,
       }}
     >
       {cells.map(cell => {
         const isCursor = cell.x === cursorPos.x && cell.y === cursorPos.y;
-        
+
         return (
-          <div 
+          <div
             key={cell.key}
             className={`
-              w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center
+              w-12 h-12 sm:w-10 sm:h-10 rounded-full flex items-center justify-center
               transition-all duration-300 relative
               ${cell.color}
             `}
@@ -45,7 +45,7 @@ export const Grid: React.FC<GridProps> = ({ level, cursorPos, isError }) => {
                 ${isCursor ? 'opacity-100 scale-110' : 'opacity-0 scale-90'}
                 ${isError && isCursor ? 'border-red-600' : ''}
              `}></div>
-             
+
              {/* Inner white dot for empty cells to make them look like "slots" */}
              {cell.color === GridColor.None && (
                  <div className="w-4 h-4 bg-white/40 rounded-full"></div>
@@ -53,7 +53,7 @@ export const Grid: React.FC<GridProps> = ({ level, cursorPos, isError }) => {
           </div>
         );
       })}
-      
+
       <style>{`
         @keyframes shake {
             0%, 100% { transform: translateX(0); }
