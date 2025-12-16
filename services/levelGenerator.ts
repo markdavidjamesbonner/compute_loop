@@ -14,15 +14,31 @@ const ACTION_NAMES: Record<Direction, string> = {
 const COLS = 5;
 const ROWS = 6;
 
-const isValidPos = (x: number, y: number) => x >= 0 && x < COLS && y >= 0 && y < ROWS;
+// Wrap coordinates to create a toroidal grid (wraps around edges)
+const wrapPos = (x: number, y: number) => {
+  // Handle negative modulo correctly
+  const wrappedX = ((x % COLS) + COLS) % COLS;
+  const wrappedY = ((y % ROWS) + ROWS) % ROWS;
+  return { x: wrappedX, y: wrappedY };
+};
+
+const isValidPos = (x: number, y: number) => {
+  // With wrapping, all positions are valid after wrapping
+  const wrapped = wrapPos(x, y);
+  return wrapped.x >= 0 && wrapped.x < COLS && wrapped.y >= 0 && wrapped.y < ROWS;
+};
 
 const movePos = (x: number, y: number, dir: Direction) => {
+  let newX = x;
+  let newY = y;
   switch (dir) {
-    case 'ArrowUp': return { x, y: y - 1 };
-    case 'ArrowDown': return { x, y: y + 1 };
-    case 'ArrowLeft': return { x: x - 1, y };
-    case 'ArrowRight': return { x: x + 1, y };
+    case 'ArrowUp': newY = y - 1; break;
+    case 'ArrowDown': newY = y + 1; break;
+    case 'ArrowLeft': newX = x - 1; break;
+    case 'ArrowRight': newX = x + 1; break;
   }
+  // Wrap the coordinates
+  return wrapPos(newX, newY);
 };
 
 interface SimulationState {
@@ -33,12 +49,12 @@ interface SimulationState {
 }
 
 // Helper: Check if a sequence of moves is valid starting from (x,y)
+// With wrapping, all paths are valid, so this always returns true
 const checkPath = (x: number, y: number, moves: Direction[]): { valid: boolean; finalX: number; finalY: number } => {
   let cx = x;
   let cy = y;
   for (const move of moves) {
     const next = movePos(cx, cy, move);
-    if (!isValidPos(next.x, next.y)) return { valid: false, finalX: cx, finalY: cy };
     cx = next.x;
     cy = next.y;
   }
@@ -107,21 +123,13 @@ export const generateLevel = (levelIndex: number): LevelData => {
             let cx = simState.x; // temp vars for generation only
             let cy = simState.y;
 
-            // Note: We don't check validity deep here, we check validity of the *Repeated* sequence below
-            // But we should pick valid single moves to increase success rate
-            let tempSeqValid = true;
+            // With wrapping, all moves are valid, so we can pick any direction
             for(let b=0; b<bodyLength; b++) {
-                 const possible = DIRECTIONS.filter(d => {
-                     const n = movePos(cx, cy, d);
-                     return isValidPos(n.x, n.y);
-                 });
-                 if(possible.length === 0) { tempSeqValid = false; break; }
-                 const m = possible[Math.floor(Math.random() * possible.length)];
+                 const m = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
                  candidateSeq.push(m);
                  const n = movePos(cx, cy, m);
                  cx = n.x; cy = n.y;
             }
-            if(!tempSeqValid) continue;
 
             // Now check if repeating this candidate sequence `loopCount` times is valid
             // We must reset to actual simState start for the check
@@ -176,71 +184,61 @@ export const generateLevel = (levelIndex: number): LevelData => {
         // if (Blue) { A } else { B }
         // We force the condition to be true (or false) by painting the grid
 
-        // Find two valid distinct moves if possible
-        const validMoves = DIRECTIONS.filter(d => isValidPos(movePos(simState.x, simState.y, d).x, movePos(simState.x, simState.y, d).y));
+        // With wrapping, all moves are valid, so we can use any direction
+        const chosenMove = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
+        // Pick a different move for the 'else' branch if possible, otherwise just a random one (gameplay wise it doesn't matter if we don't take it, but visually better if distinct)
+        const otherMove = DIRECTIONS.find(d => d !== chosenMove) || DIRECTIONS[0];
 
-        if (validMoves.length >= 1) {
-            const chosenMove = validMoves[Math.floor(Math.random() * validMoves.length)];
-            // Pick a different move for the 'else' branch if possible, otherwise just a random one (gameplay wise it doesn't matter if we don't take it, but visually better if distinct)
-            const otherMove = DIRECTIONS.find(d => d !== chosenMove) || DIRECTIONS[0];
+        const conditionColor = Math.random() > 0.5 ? GridColor.Blue : GridColor.Red;
+        const takeTrueBranch = Math.random() > 0.5;
 
-            const conditionColor = Math.random() > 0.5 ? GridColor.Blue : GridColor.Red;
-            const takeTrueBranch = Math.random() > 0.5;
-
-            // Paint the cell
-            const key = `${simState.x},${simState.y}`;
-            if (takeTrueBranch) {
-                simState.gridColors[key] = conditionColor;
-            } else {
-                // Paint it something else or leave empty to fail the condition
-                // To ensure 'else' is triggered, we can just NOT paint it the condition color.
-                // But to make it interesting, let's paint it a DIFFERENT color if possible, or just leave it.
-                // Let's leave it empty or existing color if not matching.
-                if (simState.gridColors[key] === conditionColor) {
-                    // It was already painted the condition color! We must overwrite or pick different logic.
-                    // For simplicity, let's force the branch that matches the EXISTING color if it exists.
-                    // (Skipping complex existing color logic for this demo, just overwriting is safest for generator)
-                    simState.gridColors[key] = GridColor.None;
-                }
+        // Paint the cell
+        const key = `${simState.x},${simState.y}`;
+        if (takeTrueBranch) {
+            simState.gridColors[key] = conditionColor;
+        } else {
+            // Paint it something else or leave empty to fail the condition
+            // To ensure 'else' is triggered, we can just NOT paint it the condition color.
+            // But to make it interesting, let's paint it a DIFFERENT color if possible, or just leave it.
+            // Let's leave it empty or existing color if not matching.
+            if (simState.gridColors[key] === conditionColor) {
+                // It was already painted the condition color! We must overwrite or pick different logic.
+                // For simplicity, let's force the branch that matches the EXISTING color if it exists.
+                // (Skipping complex existing color logic for this demo, just overwriting is safest for generator)
+                simState.gridColors[key] = GridColor.None;
             }
-
-            const ifNode: CodeNode = {
-                id: generateId(),
-                type: 'conditional',
-                conditionColor: conditionColor,
-                children: [
-                    { id: generateId(), type: 'action', action: ACTION_NAMES[chosenMove] }, // True
-                    { id: generateId(), type: 'action', action: ACTION_NAMES[otherMove] }   // False
-                ]
-            };
-            rootNode.children?.push(ifNode);
-
-            // Update Sim State
-            const actualMove = takeTrueBranch ? chosenMove : otherMove;
-            const activeNodeIndex = takeTrueBranch ? 0 : 1;
-
-            simState.trace.push({
-                key: actualMove,
-                nodeId: ifNode.children![activeNodeIndex].id,
-                expectedX: 0, expectedY: 0
-            });
-            const next = movePos(simState.x, simState.y, actualMove);
-            simState.x = next.x;
-            simState.y = next.y;
-            stepsGenerated++;
-            continue;
         }
+
+        const ifNode: CodeNode = {
+            id: generateId(),
+            type: 'conditional',
+            conditionColor: conditionColor,
+            children: [
+                { id: generateId(), type: 'action', action: ACTION_NAMES[chosenMove] }, // True
+                { id: generateId(), type: 'action', action: ACTION_NAMES[otherMove] }   // False
+            ]
+        };
+        rootNode.children?.push(ifNode);
+
+        // Update Sim State
+        const actualMove = takeTrueBranch ? chosenMove : otherMove;
+        const activeNodeIndex = takeTrueBranch ? 0 : 1;
+
+        simState.trace.push({
+            key: actualMove,
+            nodeId: ifNode.children![activeNodeIndex].id,
+            expectedX: 0, expectedY: 0
+        });
+        const next = movePos(simState.x, simState.y, actualMove);
+        simState.x = next.x;
+        simState.y = next.y;
+        stepsGenerated++;
+        continue;
     }
 
     // --- FALLBACK: SINGLE MOVE ---
-    const validMoves = DIRECTIONS.filter(d => {
-        const n = movePos(simState.x, simState.y, d);
-        return isValidPos(n.x, n.y);
-    });
-
-    if (validMoves.length === 0) break; // Trapped
-
-    const move = validMoves[Math.floor(Math.random() * validMoves.length)];
+    // With wrapping, all moves are valid, so we can use any direction
+    const move = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
     const actionNode: CodeNode = {
         id: generateId(),
         type: 'action',
@@ -259,7 +257,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
     stepsGenerated++;
   }
 
-  // Update trace coordinates
+  // Update trace coordinates (already wrapped by movePos)
   let currX = startX;
   let currY = startY;
   for (const step of simState.trace) {

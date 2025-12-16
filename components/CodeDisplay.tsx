@@ -25,7 +25,15 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
 
   if (node.type === 'root') {
     return (
-      <div className="font-code text-sm sm:text-base leading-relaxed text-slate-700">
+    //   <div className="font-code text-sm sm:text-base leading-relaxed text-slate-700">
+    //     {node.children?.map(child => (
+    //       <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} depth={0} />
+    //     ))}
+    //   </div>
+      <div
+        className="font-code text-xl leading-relaxed text-slate-900"
+        style={{ fontSize: '2.25rem' }}
+      >
         {node.children?.map(child => (
           <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} depth={0} />
         ))}
@@ -36,6 +44,7 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
   if (node.type === 'action') {
     return (
       <div
+        data-node-id={node.id}
         className={`
           relative my-0.5 px-2 py-0.5 rounded
           transition-all duration-200
