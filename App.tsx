@@ -8,7 +8,7 @@ function App() {
     const [gameState, setGameState] = useState<'map' | 'playing'>('map');
 
     // Set to high number to unlock all levels for testing
-    const [unlockedLevel, setUnlockedLevel] = useState(3);
+    const [unlockedLevel, setUnlockedLevel] = useState(19);
 
     const [currentLevelId, setCurrentLevelId] = useState(0);
 

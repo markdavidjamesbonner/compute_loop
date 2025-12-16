@@ -69,6 +69,17 @@ export const GameView: React.FC<GameViewProps> = ({
         const cellKey = `${cursorPos.x},${cursorPos.y}`;
         const cellColor = level.gridColors[cellKey] || GridColor.None;
         const conditionMet = cellColor === conditionalParent.conditionColor;
+        
+        // Debug logging for blue color issue
+        if (conditionalParent.conditionColor === GridColor.Blue) {
+          console.log('Blue conditional check:', {
+            cellKey,
+            cellColor,
+            conditionColor: conditionalParent.conditionColor,
+            conditionMet,
+            gridColors: level.gridColors
+          });
+        }
 
         // Determine which branch should be taken
         const trueBranchAction = conditionalParent.children?.[0];
