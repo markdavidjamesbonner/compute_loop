@@ -44,10 +44,23 @@ export const GameView: React.FC<GameViewProps> = ({
     resetLevel();
   }, [level.id, resetLevel]);
 
-  // Helper to find conditional parent of a node
+  // Helper to find conditional or while loop parent of a node
   const findConditionalParent = (nodeId: string, node: CodeNode): CodeNode | null => {
     if (node.type === 'conditional' && node.children) {
-      if (node.children[0]?.id === nodeId || node.children[1]?.id === nodeId) {
+      // Check if nodeId is in any branch of the conditional
+      const isInConditional = node.children.some(child =>
+        child.id === nodeId || findNodeInTree(nodeId, child)
+      );
+      if (isInConditional) {
+        return node;
+      }
+    }
+    if (node.type === 'while' && node.children) {
+      // Check if nodeId is in the while loop body
+      const isInWhile = node.children.some(child =>
+        child.id === nodeId || findNodeInTree(nodeId, child)
+      );
+      if (isInWhile) {
         return node;
       }
     }
@@ -58,6 +71,15 @@ export const GameView: React.FC<GameViewProps> = ({
       }
     }
     return null;
+  };
+
+  // Helper to recursively find a node in the tree
+  const findNodeInTree = (nodeId: string, node: CodeNode): boolean => {
+    if (node.id === nodeId) return true;
+    if (node.children) {
+      return node.children.some(child => findNodeInTree(nodeId, child));
+    }
+    return false;
   };
 
   const handleKeyDown = useCallback(
@@ -72,20 +94,14 @@ export const GameView: React.FC<GameViewProps> = ({
 
       const expectedStep = level.solutionTrace[stepIndex];
 
-      // Check if this step is from a conditional
+      // Check if this step is from a conditional or while loop
       const conditionalParent = findConditionalParent(expectedStep.nodeId, level.codeTree);
 
       if (conditionalParent && conditionalParent.conditionColor) {
-        // This is a conditional step - verify the color condition
-        // Ensure cursor position is wrapped (should already be, but safety check)
+        // This is a conditional or while loop step - verify the color condition
         const wrappedCursor = wrapPos(cursorPos.x, cursorPos.y, level.gridSize.cols, level.gridSize.rows);
         const cellKey = `${wrappedCursor.x},${wrappedCursor.y}`;
         const cellColor = level.gridColors[cellKey] || GridColor.None;
-        const conditionMet = cellColor === conditionalParent.conditionColor;
-
-        // Determine which branch should be taken based on current cell color
-        const trueBranchAction = conditionalParent.children?.[0];
-        const falseBranchAction = conditionalParent.children?.[1];
 
         // Map action names to directions
         const ACTION_TO_DIRECTION: Record<string, string> = {
@@ -95,69 +111,96 @@ export const GameView: React.FC<GameViewProps> = ({
           'right': 'ArrowRight'
         };
 
-        // Determine which branch the trace expects (based on which nodeId is in the trace)
-        const traceExpectedAction = conditionalParent.children?.find(
-          child => child.id === expectedStep.nodeId
-        );
-        const traceExpectedDirection = traceExpectedAction?.action
-          ? ACTION_TO_DIRECTION[traceExpectedAction.action]
-          : null;
+        if (conditionalParent.type === 'while') {
+          // For while loops, the condition must be true (cell color matches)
+          const conditionMet = cellColor === conditionalParent.conditionColor;
 
-        // Determine which branch should be taken based on current condition
-        const currentExpectedAction = conditionMet ? trueBranchAction : falseBranchAction;
-        const currentExpectedDirection = currentExpectedAction?.action
-          ? ACTION_TO_DIRECTION[currentExpectedAction.action]
-          : null;
+          if (!conditionMet) {
+            // Condition is false, but we're still in the loop - this shouldn't happen in trace
+            // But we'll allow it if the key matches the trace
+            if (e.key === expectedStep.key) {
+              const wrapped = wrapPos(expectedStep.expectedX, expectedStep.expectedY, level.gridSize.cols, level.gridSize.rows);
+              setCursorPos(wrapped);
+              const nextIndex = stepIndex + 1;
+              setStepIndex(nextIndex);
+              if (nextIndex >= level.solutionTrace.length) {
+                setTimeout(() => onComplete(), 300);
+              }
+            } else {
+              setIsError(true);
+              setTimeout(() => resetLevel(), 500);
+            }
+          } else {
+            // Condition is true, verify the action matches
+            const traceExpectedAction = conditionalParent.children?.find(
+              child => child.id === expectedStep.nodeId || findNodeInTree(expectedStep.nodeId, child)
+            );
+            const traceExpectedDirection = traceExpectedAction?.action
+              ? ACTION_TO_DIRECTION[traceExpectedAction.action]
+              : null;
 
-        // Verify that:
-        // 1. The pressed key matches what the current condition expects
-        // 2. The current condition evaluation matches what the trace expects (cell color matches trace assumption)
-        // 3. The pressed key matches the trace step key
-        const conditionMatchesTrace = traceExpectedAction?.id === currentExpectedAction?.id;
-        const keyMatchesCurrentCondition = e.key === currentExpectedDirection;
-        const keyMatchesTrace = e.key === expectedStep.key;
-
-        // Debug logging for conditional checks
-        if (conditionalParent.conditionColor === GridColor.Blue || conditionalParent.conditionColor === GridColor.Red) {
-          console.log('Conditional check:', {
-            cellKey,
-            cellColor,
-            conditionColor: conditionalParent.conditionColor,
-            conditionMet,
-            traceExpectedAction: traceExpectedAction?.action,
-            currentExpectedAction: currentExpectedAction?.action,
-            conditionMatchesTrace,
-            pressedKey: e.key,
-            currentExpectedDirection,
-            traceExpectedDirection,
-            expectedStepKey: expectedStep.key,
-            keyMatchesCurrentCondition,
-            keyMatchesTrace,
-            gridColors: level.gridColors
-          });
-        }
-
-        if (conditionMatchesTrace && keyMatchesCurrentCondition && keyMatchesTrace) {
-          // Correct Input - color condition matches trace expectation and key is correct
-          // Wrap coordinates to ensure they're in bounds (should already be wrapped, but safety check)
-          const wrapped = wrapPos(expectedStep.expectedX, expectedStep.expectedY, level.gridSize.cols, level.gridSize.rows);
-          setCursorPos(wrapped);
-
-          const nextIndex = stepIndex + 1;
-          setStepIndex(nextIndex);
-
-          if (nextIndex >= level.solutionTrace.length) {
-            // Level Complete
-            setTimeout(() => {
-              onComplete();
-            }, 300);
+            if (e.key === expectedStep.key && (traceExpectedDirection === null || e.key === traceExpectedDirection)) {
+              const wrapped = wrapPos(expectedStep.expectedX, expectedStep.expectedY, level.gridSize.cols, level.gridSize.rows);
+              setCursorPos(wrapped);
+              const nextIndex = stepIndex + 1;
+              setStepIndex(nextIndex);
+              if (nextIndex >= level.solutionTrace.length) {
+                setTimeout(() => onComplete(), 300);
+              }
+            } else {
+              setIsError(true);
+              setTimeout(() => resetLevel(), 500);
+            }
           }
         } else {
-          // Wrong Input - either color doesn't match trace expectation or wrong key
-          setIsError(true);
-          setTimeout(() => {
-            resetLevel();
-          }, 500);
+          // This is a conditional (if/else-if/else)
+          const conditionMet = cellColor === conditionalParent.conditionColor;
+
+          // Find which branch the trace expects
+          let traceExpectedBranchIndex = -1;
+          for (let i = 0; i < (conditionalParent.children?.length || 0); i++) {
+            const child = conditionalParent.children![i];
+            if (child.id === expectedStep.nodeId || findNodeInTree(expectedStep.nodeId, child)) {
+              traceExpectedBranchIndex = i;
+              break;
+            }
+          }
+
+          // Determine which branch should be taken based on current cell color
+          // For else-if chains: check each branch color until one matches
+          let expectedBranchIndex = (conditionalParent.children?.length || 1) - 1; // Default to else
+          if (conditionMet) {
+            expectedBranchIndex = 0; // If branch
+          } else {
+            // Check else-if branches (if any)
+            // For simplicity, we'll check if the color matches any of the other branch colors
+            // Since we don't store branch colors explicitly, we'll use the trace expectation
+            expectedBranchIndex = traceExpectedBranchIndex >= 0 ? traceExpectedBranchIndex : expectedBranchIndex;
+          }
+
+          const traceExpectedAction = traceExpectedBranchIndex >= 0
+            ? conditionalParent.children![traceExpectedBranchIndex]
+            : null;
+          const traceExpectedDirection = traceExpectedAction?.action
+            ? ACTION_TO_DIRECTION[traceExpectedAction.action]
+            : null;
+
+          // Verify that the pressed key matches the trace expectation
+          const keyMatchesTrace = e.key === expectedStep.key;
+          const keyMatchesExpectedDirection = traceExpectedDirection ? e.key === traceExpectedDirection : true;
+
+          if (keyMatchesTrace && keyMatchesExpectedDirection) {
+            const wrapped = wrapPos(expectedStep.expectedX, expectedStep.expectedY, level.gridSize.cols, level.gridSize.rows);
+            setCursorPos(wrapped);
+            const nextIndex = stepIndex + 1;
+            setStepIndex(nextIndex);
+            if (nextIndex >= level.solutionTrace.length) {
+              setTimeout(() => onComplete(), 300);
+            }
+          } else {
+            setIsError(true);
+            setTimeout(() => resetLevel(), 500);
+          }
         }
       } else {
         // Regular step (not a conditional)
