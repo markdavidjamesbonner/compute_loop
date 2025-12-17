@@ -32,7 +32,7 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
     //   </div>
       <div
         className="font-code text-xl leading-relaxed text-slate-900"
-        style={{ fontSize: '2.25rem' }}
+        style={{ fontSize: '1.25rem' }}
       >
         {node.children?.map(child => (
           <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} depth={0} />

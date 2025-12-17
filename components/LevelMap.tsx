@@ -11,7 +11,7 @@ export const LevelMap: React.FC<LevelMapProps> = ({ unlockedLevel, onSelectLevel
 
   // Generate a list of "endless" levels for the map visual
   // We'll show a bit more than what's unlocked to show progress possibility
-  const totalVisible = Math.max(unlockedLevel + 5, 20);
+  const totalVisible = Math.max(unlockedLevel + 1, 50);
   const levels = Array.from({ length: totalVisible }, (_, i) => i);
 
   // Auto scroll to latest unlocked

@@ -285,9 +285,15 @@ export const GameView: React.FC<GameViewProps> = ({
 
         {/* 🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨 left: code panel */}
         <div className="w-full md:w-2/3 bg-white rounded-xl shadow-lg p-6 border-l-4 border-yellow-400 flex flex-col overflow-hidden h-full">
-          <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 shrink-0">
+
+          <div className="mt-auto text-sm text-gray-900 shrink-0 pb-3">
+            Use your keyboard arrow keys to call the functions.
+          </div>
+
+          <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-10 shrink-0">
             program
           </div>
+
           <div
             ref={codeScrollRef}
             className="flex-1 overflow-y-auto min-h-0 scroll-smooth"
@@ -295,9 +301,7 @@ export const GameView: React.FC<GameViewProps> = ({
           >
             <CodeDisplay node={level.codeTree} activeNodeId={activeNodeId} />
           </div>
-          <div className="mt-auto pt-6 text-sm text-gray-400 text-center shrink-0">
-            use your keyboard arrow keys to call the functions.
-          </div>
+
         </div>
 
         {/* 🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨 right: grid - sticky */}
