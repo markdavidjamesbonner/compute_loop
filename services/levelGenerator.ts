@@ -60,6 +60,55 @@ const executeMove = (state: SimulationState, dir: Direction, nodeId: string) => 
   state.y = next.y;
 };
 
+// Helper to execute a nested code structure's moves
+// This is used to re-execute nested structures in repeat loops
+const executeNodeMoves = (state: SimulationState, node: CodeNode): number => {
+  let steps = 0;
+
+  if (node.type === 'action' && node.action) {
+    // Map action string to Direction
+    const actionToDir: Record<string, Direction> = {
+      'up': 'ArrowUp',
+      'down': 'ArrowDown',
+      'left': 'ArrowLeft',
+      'right': 'ArrowRight'
+    };
+    const dir = actionToDir[node.action] as Direction;
+    if (dir) {
+      executeMove(state, dir, node.id);
+      steps++;
+    }
+  } else if (node.type === 'loop' && node.count && node.children) {
+    // Repeat loop: execute body count times
+    for (let i = 0; i < node.count; i++) {
+      for (const child of node.children) {
+        steps += executeNodeMoves(state, child);
+      }
+    }
+  } else if (node.type === 'while' && node.conditionColor && node.children) {
+    // While loop: execute body while condition is met
+    // For trace generation, we simulate execution
+    const startKey = `${state.x},${state.y}`;
+    const cellColor = state.gridColors[startKey] || GridColor.None;
+    if (cellColor === node.conditionColor) {
+      // Execute body at least once
+      for (const child of node.children) {
+        steps += executeNodeMoves(state, child);
+      }
+    }
+  } else if (node.type === 'conditional' && node.children && node.children.length > 0) {
+    // Conditional: execute first branch (the one that matches)
+    steps += executeNodeMoves(state, node.children[0]);
+  } else if (node.children) {
+    // Recursively execute children
+    for (const child of node.children) {
+      steps += executeNodeMoves(state, child);
+    }
+  }
+
+  return steps;
+};
+
 // Generate a code structure recursively
 // Returns the node and number of steps it generates
 const generateCodeStructure = (
@@ -73,38 +122,50 @@ const generateCodeStructure = (
     return { node: null, steps: 0 };
   }
 
+  // Check current cell color - use it to generate appropriate structures
+  const currentKey = `${state.x},${state.y}`;
+  const currentColor = state.gridColors[currentKey] || GridColor.None;
+
   const rand = Math.random();
   const maxDepth = difficulty >= 50 ? 3 : difficulty >= 30 ? 2 : 1;
 
-  // For high levels (50+), prioritize complex structures
-  if (difficulty >= 50 && allowNesting && depth < maxDepth && rand < 0.6 && remainingSteps >= 3) {
-    // Try nested structures: while with conditionals, loops with conditionals, etc.
-    const nestedRand = Math.random();
+  // If we're on a colored cell, try to generate structures that use it
+  if (currentColor !== GridColor.None) {
+    // For high levels (50+), prioritize complex structures
+    if (difficulty >= 50 && allowNesting && depth < maxDepth && rand < 0.6 && remainingSteps >= 3) {
+      const nestedRand = Math.random();
+      if (nestedRand < 0.5 && remainingSteps >= 4) {
+        return generateWhileLoop(state, difficulty, remainingSteps, true, depth);
+      } else if (nestedRand < 0.75 && remainingSteps >= 5) {
+        return generateRepeatLoop(state, difficulty, remainingSteps, true, depth);
+      } else if (remainingSteps >= 3) {
+        return generateConditional(state, difficulty, remainingSteps, true, depth);
+      }
+    }
 
-    if (nestedRand < 0.4 && remainingSteps >= 4) {
-      // Generate a while loop with nested conditional
-      return generateWhileLoop(state, difficulty, remainingSteps, true, depth);
-    } else if (nestedRand < 0.7 && remainingSteps >= 5) {
-      // Generate a repeat loop with nested conditional
-      return generateRepeatLoop(state, difficulty, remainingSteps, true, depth);
-    } else if (remainingSteps >= 3) {
-      // Generate a conditional with nested structures
-      return generateConditional(state, difficulty, remainingSteps, true, depth);
+    // Try while loops (levels 20+) - higher probability when on colored cell
+    if (difficulty >= 20 && remainingSteps >= 3 && rand < 0.7) {
+      return generateWhileLoop(state, difficulty, remainingSteps, allowNesting, depth);
+    }
+
+    // Try conditionals (levels 10+) - higher probability when on colored cell
+    if (difficulty >= 10 && remainingSteps >= 2 && rand < 0.6) {
+      return generateConditional(state, difficulty, remainingSteps, allowNesting, depth);
     }
   }
 
-  // Try while loops (levels 20+)
-  if (difficulty >= 20 && remainingSteps >= 3 && rand < 0.4) {
-    return generateWhileLoop(state, difficulty, remainingSteps, allowNesting, depth);
-  }
-
-  // Try repeat loops (levels 1+)
+  // Try repeat loops (levels 1+) - can work from any cell
   if (difficulty >= 1 && remainingSteps >= 3 && rand < 0.5) {
     return generateRepeatLoop(state, difficulty, remainingSteps, allowNesting, depth);
   }
 
-  // Try conditionals with else-if chains (levels 10+)
-  if (difficulty >= 10 && remainingSteps >= 2 && rand < 0.4) {
+  // Try while loops even if not on colored cell (lower probability)
+  if (difficulty >= 20 && remainingSteps >= 3 && rand < 0.3) {
+    return generateWhileLoop(state, difficulty, remainingSteps, allowNesting, depth);
+  }
+
+  // Try conditionals even if not on colored cell (lower probability)
+  if (difficulty >= 10 && remainingSteps >= 2 && rand < 0.2) {
     return generateConditional(state, difficulty, remainingSteps, allowNesting, depth);
   }
 
@@ -112,7 +173,9 @@ const generateCodeStructure = (
   if (remainingSteps >= 1) {
     const dir = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
     const actionNode = generateAction(dir);
+    console.log(`  📍 Generating standalone action: ${dir} at (${state.x},${state.y}), nodeId=${actionNode.id}`);
     executeMove(state, dir, actionNode.id);
+    console.log(`  ✅ Added trace step for ${dir}, new position (${state.x},${state.y}), trace length=${state.trace.length}`);
     return { node: actionNode, steps: 1 };
   }
 
@@ -127,21 +190,22 @@ const generateWhileLoop = (
   allowNesting: boolean,
   depth: number
 ): { node: CodeNode | null; steps: number } => {
-  const conditionColor = [GridColor.Red, GridColor.Blue, GridColor.Yellow, GridColor.Green][
-    Math.floor(Math.random() * 4)
-  ];
-
   const startX = state.x;
   const startY = state.y;
   const startKey = `${startX},${startY}`;
-
-  // Check if we're already on a cell with the condition color
   const currentColor = state.gridColors[startKey] || GridColor.None;
-  const startsOnCondition = currentColor === conditionColor;
 
-  // Generate loop body (1-2 actions for variety)
+  // Use current cell's color if available, otherwise random
+  // This ensures while loops actually execute when we're on colored cells
+  const conditionColor = currentColor !== GridColor.None
+    ? currentColor
+    : [GridColor.Red, GridColor.Blue, GridColor.Yellow, GridColor.Green][
+        Math.floor(Math.random() * 4)
+      ];
+
+  // Generate loop body first (needed for UI display even if condition is false)
   const bodyLength = difficulty >= 50 ? (Math.random() > 0.5 ? 2 : 1) : 1;
-  const maxIterations = difficulty >= 50 ? 8 : difficulty >= 30 ? 5 : 3;
+  const maxIterations = difficulty >= 50 ? 5 : difficulty >= 30 ? 3 : 2;
 
   // Generate body actions and nodes once (we'll repeat them)
   const bodyActions: Direction[] = [];
@@ -153,57 +217,100 @@ const generateWhileLoop = (
     bodyNodes.push(actionNode);
   }
 
+  // Check if current cell can support this while loop
+  // CRITICAL: If the current cell has a different color (not empty, not condition color),
+  // this while loop cannot execute. This prevents generating steps for while loops that can't run
+  // (e.g., when previous while loops with the same color consumed all cells of that color)
+  // Note: currentColor is already declared above
+
+  if (currentColor !== GridColor.None && currentColor !== conditionColor) {
+    // Current cell has a different color - this while loop cannot execute
+    // Still create the node for UI display, but return 0 steps
+    console.log(`⚠️  While loop at (${startX},${startY}) cannot execute: current cell color is ${currentColor}, required ${conditionColor}`);
+    console.log(`    This likely means previous while loops consumed all cells of this color.`);
+    const whileNode: CodeNode = {
+      id: generateId(),
+      type: 'while',
+      conditionColor,
+      children: bodyNodes
+    };
+    return { node: whileNode, steps: 0 };
+  }
+
+  // Check if current cell has condition color - if not, can't execute
+  // DON'T PAINT - just check what's actually in the grid
+  if (currentColor !== conditionColor) {
+    console.log(`⚠️  While loop at (${startX},${startY}) cannot execute: current cell color is ${currentColor}, required ${conditionColor}`);
+    const whileNode: CodeNode = {
+      id: generateId(),
+      type: 'while',
+      conditionColor,
+      children: bodyNodes
+    };
+    return { node: whileNode, steps: 0 };
+  }
+
+  console.log(`🔵 While loop starting at (${startX},${startY}), conditionColor=${conditionColor}, maxIterations=${maxIterations}, bodyLength=${bodyLength}`);
+
   // Simulate the while loop execution
-  let tempX = startX;
-  let tempY = startY;
+  // Execute iterations as long as condition is met
   let iterations = 0;
   let totalSteps = 0;
 
-  // Execute iterations until we exit the condition
   while (iterations < maxIterations && totalSteps + bodyLength <= maxSteps) {
-    const currentKey = `${tempX},${tempY}`;
+    // Check condition on CURRENT position before each iteration
+    // Use state.x/state.y which is updated by executeMove
+    const currentKey = `${state.x},${state.y}`;
     const cellColor = state.gridColors[currentKey] || GridColor.None;
 
+    // Check condition FIRST - if false, exit immediately
     if (cellColor !== conditionColor) {
-      // Condition is false, exit loop
+      // Condition is false, exit loop - don't generate more steps
+      console.log(`  🛑 While loop condition false at (${state.x},${state.y}): color=${cellColor}, required=${conditionColor} - exiting`);
       break;
     }
 
-    // Execute body (reuse the same body nodes for trace)
+    // Condition is true - execute body
+    console.log(`  🔄 While loop iteration ${iterations + 1}/${maxIterations}: executing body at (${state.x},${state.y})`);
+
+    // Execute body actions
     for (let i = 0; i < bodyActions.length; i++) {
       const dir = bodyActions[i];
       const actionNode = bodyNodes[i];
+
+      // Check intermediate positions (except before first action)
+      if (i > 0) {
+        const intermediateKey = `${state.x},${state.y}`;
+        const intermediateColor = state.gridColors[intermediateKey] || GridColor.None;
+
+        // If intermediate position doesn't have condition color, can't continue
+        if (intermediateColor !== GridColor.None && intermediateColor !== conditionColor) {
+          console.log(`    🛑 Stopping body execution at action ${i + 1}/${bodyActions.length}: position (${state.x},${state.y}) has color ${intermediateColor}, required ${conditionColor}`);
+          break;
+        }
+
+        if (intermediateColor === GridColor.None) {
+          console.log(`    🛑 Stopping body execution at action ${i + 1}/${bodyActions.length}: position (${state.x},${state.y}) is empty`);
+          break;
+        }
+      }
+
+      // Execute this action (this updates state.x and state.y)
       executeMove(state, dir, actionNode.id);
       totalSteps++;
-
-      const next = movePos(tempX, tempY, dir);
-      tempX = next.x;
-      tempY = next.y;
     }
 
     iterations++;
 
-    // Ensure we eventually exit (paint the next cell differently if needed)
-    if (iterations >= maxIterations - 1) {
-      const exitKey = `${tempX},${tempY}`;
-      if (!state.gridColors[exitKey] || state.gridColors[exitKey] === conditionColor) {
-        // Paint it a different color to ensure exit
-        const otherColors = [GridColor.Red, GridColor.Blue, GridColor.Yellow, GridColor.Green]
-          .filter(c => c !== conditionColor);
-        state.gridColors[exitKey] = otherColors[Math.floor(Math.random() * otherColors.length)];
-      }
-    }
+    // After executing body, state.x/state.y have been updated to the new position
+    // The condition will be checked again at the start of the next iteration
+    console.log(`  ✅ Completed iteration ${iterations}, now at (${state.x},${state.y}), color=${state.gridColors[`${state.x},${state.y}`] || GridColor.None}`);
   }
 
-  // Ensure we start on the condition color if we have iterations
-  if (iterations > 0 && !startsOnCondition) {
-    state.gridColors[startKey] = conditionColor;
-  }
-
-  // Fallback: if no iterations happened, ensure at least one
+  // Ensure we executed at least one iteration (condition was true, so we should have executed)
+  // This is a safeguard - should never be needed since condition was checked first
   if (iterations === 0 && bodyNodes.length > 0) {
-    state.gridColors[startKey] = conditionColor;
-    // Execute body once
+    console.warn(`While loop condition was true but no iterations executed - executing body once`);
     for (let i = 0; i < bodyActions.length; i++) {
       const dir = bodyActions[i];
       const actionNode = bodyNodes[i];
@@ -246,36 +353,27 @@ const generateRepeatLoop = (
   const bodyNodes: CodeNode[] = [];
   const bodyActions: Direction[] = [];
 
-  // Generate body (with potential nesting for high levels)
+  // Generate body - SIMPLIFIED: only simple actions for now
+  // TODO: Add nested structure support later once simple actions work correctly
   for (let i = 0; i < bodyLength; i++) {
-    if (allowNesting && depth < 2 && difficulty >= 30 && Math.random() > 0.6) {
-      // Nested structure in loop body
-      const nested = generateCodeStructure(state, difficulty, maxSteps - (loopCount * bodyLength), false, depth + 1);
-      if (nested.node) {
-        bodyNodes.push(nested.node);
-        // Estimate steps (will be recalculated)
-        bodyActions.push(DIRECTIONS[0]); // Placeholder
-        continue;
-      }
-    }
-
-    // Simple action
+    // Simple action only
     const dir = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
     bodyActions.push(dir);
     const actionNode = generateAction(dir);
     bodyNodes.push(actionNode);
   }
 
-  // Execute the loop
+  // Execute the loop - SIMPLIFIED: execute body actions loopCount times
+  // Each iteration executes all body actions in order, using the SAME nodeIds
   let totalSteps = 0;
   for (let i = 0; i < loopCount; i++) {
     for (let j = 0; j < bodyLength; j++) {
-      if (j < bodyActions.length) {
-        const dir = bodyActions[j];
-        const nodeId = bodyNodes[j].id;
-        executeMove(state, dir, nodeId);
-        totalSteps++;
-      }
+      const dir = bodyActions[j];
+      const node = bodyNodes[j];
+      // Execute the move using the same nodeId for all iterations
+      // This is correct - the same action node is executed multiple times
+      executeMove(state, dir, node.id);
+      totalSteps++;
     }
   }
 
@@ -304,20 +402,22 @@ const generateConditional = (
     ? 2  // if + else-if
     : 2; // if + else
 
-  const branches: CodeNode[] = [];
-  const branchMoves: Direction[] = [];
+  // CRITICAL: Determine which branch to execute FIRST, before generating nested structures
+  // This ensures we check the correct cell color and don't execute wrong branches
+  const currentKey = `${state.x},${state.y}`;
+  const currentColor = state.gridColors[currentKey] || GridColor.None;
+
+  // Generate branch colors first
   const branchColors: GridColor[] = [];
-
-  // Generate branches
   for (let i = 0; i < numBranches; i++) {
-    const dir = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
-    branchMoves.push(dir);
-
     if (i === 0) {
-      // First branch: if condition
-      branchColors.push([GridColor.Red, GridColor.Blue, GridColor.Yellow, GridColor.Green][
-        Math.floor(Math.random() * 4)
-      ]);
+      // First branch: if condition - use current cell color if available
+      const firstBranchColor = currentColor !== GridColor.None
+        ? currentColor
+        : [GridColor.Red, GridColor.Blue, GridColor.Yellow, GridColor.Green][
+            Math.floor(Math.random() * 4)
+          ];
+      branchColors.push(firstBranchColor);
     } else {
       // Else-if branches: different colors
       const usedColors = branchColors.slice(0, i);
@@ -325,24 +425,9 @@ const generateConditional = (
         .filter(c => !usedColors.includes(c));
       branchColors.push(availableColors[Math.floor(Math.random() * availableColors.length)]);
     }
-
-    // Generate branch content (with potential nesting)
-    if (allowNesting && depth < 2 && difficulty >= 40 && Math.random() > 0.7) {
-      const nested = generateCodeStructure(state, difficulty, maxSteps - 1, false, depth + 1);
-      if (nested.node) {
-        branches.push(nested.node);
-        continue;
-      }
-    }
-
-    // Simple action branch
-    branches.push(generateAction(dir));
   }
 
-  // Determine which branch to take based on current cell color
-  const currentKey = `${state.x},${state.y}`;
-  const currentColor = state.gridColors[currentKey] || GridColor.None;
-
+  // Determine which branch to execute based on ACTUAL current cell color
   let branchIndex = numBranches - 1; // Default to else branch
   for (let i = 0; i < numBranches; i++) {
     if (currentColor === branchColors[i]) {
@@ -351,16 +436,60 @@ const generateConditional = (
     }
   }
 
-  // If no branch matches, paint the cell for the first branch
-  if (branchIndex === numBranches - 1 && currentColor !== branchColors[0]) {
-    state.gridColors[currentKey] = branchColors[0];
-    branchIndex = 0;
+  console.log(`  🎯 Conditional: current cell (${state.x},${state.y}) has color ${currentColor}, will execute branch ${branchIndex}`);
+
+  // Now generate branches - execute only the chosen branch
+  const branches: CodeNode[] = [];
+  const branchMoves: Direction[] = [];
+
+  // Save state before generating branches
+  const savedX = state.x;
+  const savedY = state.y;
+
+  // Generate branch nodes (without executing)
+  for (let i = 0; i < numBranches; i++) {
+    const dir = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
+    branchMoves.push(dir);
+
+    // Generate branch content (with potential nesting)
+    if (allowNesting && depth < 2 && difficulty >= 40 && Math.random() > 0.7) {
+      // For nested structures, we need to generate the code tree but not execute yet
+      // We'll execute only the chosen branch
+      const nested = generateCodeStructure(state, difficulty, maxSteps - 1, false, depth + 1);
+      if (nested.node) {
+        branches.push(nested.node);
+        // Restore state after generating (nested structures might have moved us)
+        state.x = savedX;
+        state.y = savedY;
+        // Remove steps added by nested structure (we'll execute chosen branch later)
+        const stepsToRemove = nested.steps;
+        if (stepsToRemove > 0) {
+          console.log(`  🗑️  Removing ${stepsToRemove} trace steps from branch ${i} (will execute chosen branch later)`);
+          state.trace.splice(state.trace.length - stepsToRemove, stepsToRemove);
+        }
+        continue;
+      }
+    }
+
+    // Simple action branch
+    branches.push(generateAction(dir));
   }
 
-  // Execute the chosen branch
-  const chosenMove = branchMoves[branchIndex];
+  // Restore state before executing chosen branch
+  state.x = savedX;
+  state.y = savedY;
+
+  // Execute ONLY the chosen branch
   const chosenNode = branches[branchIndex];
-  executeMove(state, chosenMove, chosenNode.id);
+
+  if (chosenNode.type === 'action') {
+    // Simple action - execute it
+    const chosenMove = branchMoves[branchIndex];
+    executeMove(state, chosenMove, chosenNode.id);
+  } else {
+    // Nested structure - execute it to generate trace steps
+    executeNodeMoves(state, chosenNode);
+  }
 
   // Store branch colors by adding them to child nodes as metadata
   // We'll use the conditionColor field on child nodes to store their branch color
@@ -391,6 +520,40 @@ export const generateLevel = (levelIndex: number): LevelData => {
   const startX = Math.floor(Math.random() * (COLS - 2)) + 1;
   const startY = Math.floor(Math.random() * (ROWS - 2)) + 1;
 
+  // STEP 1: Generate the grid colors FIRST
+  // This is the source of truth - code will be generated to match this grid
+  const gridColors: Record<string, GridColor> = {};
+  const allColors = [GridColor.Red, GridColor.Blue, GridColor.Yellow, GridColor.Green];
+  const totalCells = COLS * ROWS;
+
+  // Higher color density for higher levels
+  const colorDensity = difficulty >= 50
+    ? 0.4 + (Math.random() * 0.3)  // 40-70%
+    : 0.3 + (Math.random() * 0.2);  // 30-50%
+  const cellsToColor = Math.floor(totalCells * colorDensity);
+
+  // Get all cell positions and shuffle
+  const allPositions: Array<{ x: number; y: number }> = [];
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      allPositions.push({ x, y });
+    }
+  }
+  for (let i = allPositions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allPositions[i], allPositions[j]] = [allPositions[j], allPositions[i]];
+  }
+
+  // Fill grid with random colors
+  for (let i = 0; i < Math.min(cellsToColor, allPositions.length); i++) {
+    const pos = allPositions[i];
+    const key = `${pos.x},${pos.y}`;
+    const randomColor = allColors[Math.floor(Math.random() * allColors.length)];
+    gridColors[key] = randomColor;
+  }
+
+  console.log(`🎨 Generated grid with ${Object.keys(gridColors).length} colored cells`);
+
   const rootNode: CodeNode = {
     id: generateId(),
     type: 'root',
@@ -400,7 +563,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
   const simState: SimulationState = {
     x: startX,
     y: startY,
-    gridColors: {},
+    gridColors: { ...gridColors }, // Copy grid colors - code generation will check, not paint
     trace: []
   };
 
@@ -420,7 +583,10 @@ export const generateLevel = (levelIndex: number): LevelData => {
 
     const result = generateCodeStructure(simState, difficulty, remaining, true, 0);
 
-    if (result.node && result.steps > 0) {
+    if (result.node) {
+      // Add node to tree even if it has 0 steps (e.g., while loops that can't execute)
+      // This ensures the code tree matches what's displayed in the UI
+      console.log(`📦 Generated ${result.node.type} node (id=${result.node.id}), steps=${result.steps}, trace length=${simState.trace.length}`);
       rootNode.children?.push(result.node);
       stepsGenerated += result.steps;
 
@@ -435,7 +601,7 @@ export const generateLevel = (levelIndex: number): LevelData => {
       };
       collectColors(result.node);
     } else {
-      // Fallback: single move
+      // Fallback: only generate random action if no node was returned at all
       const dir = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
       const actionNode = generateAction(dir);
       executeMove(simState, dir, actionNode.id);
@@ -455,79 +621,68 @@ export const generateLevel = (levelIndex: number): LevelData => {
     currY = next.y;
   }
 
-  // Collect all conditional/while colors from the code tree
-  const conditionalColors = new Set<GridColor>();
-  const collectConditionalColors = (node: CodeNode) => {
-    if ((node.type === 'conditional' || node.type === 'while') && node.conditionColor) {
-      conditionalColors.add(node.conditionColor);
-    }
-    node.children?.forEach(collectConditionalColors);
-  };
-  collectConditionalColors(rootNode);
+  // Validation: Count expected trace steps from code tree
+  // This accounts for loops executing their bodies multiple times
+  const countExpectedSteps = (node: CodeNode): number => {
+    let steps = 0;
 
-  // Populate grid with colors
-  const existingColorMap = { ...simState.gridColors };
-  const allColors = [GridColor.Red, GridColor.Blue, GridColor.Yellow, GridColor.Green];
-  const totalCells = COLS * ROWS;
-
-  // Higher color density for higher levels
-  const colorDensity = difficulty >= 50
-    ? 0.4 + (Math.random() * 0.3)  // 40-70%
-    : 0.3 + (Math.random() * 0.2);  // 30-50%
-  const cellsToColor = Math.floor(totalCells * colorDensity);
-
-  // Get all cell positions
-  const allPositions: Array<{ x: number; y: number }> = [];
-  for (let y = 0; y < ROWS; y++) {
-    for (let x = 0; x < COLS; x++) {
-      allPositions.push({ x, y });
-    }
-  }
-
-  // Shuffle positions
-  for (let i = allPositions.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [allPositions[i], allPositions[j]] = [allPositions[j], allPositions[i]];
-  }
-
-  // Ensure conditional colors appear at least once
-  const conditionalColorArray = Array.from(conditionalColors);
-  let positionIndex = 0;
-  for (const color of conditionalColorArray) {
-    while (positionIndex < allPositions.length) {
-      const pos = allPositions[positionIndex];
-      const key = `${pos.x},${pos.y}`;
-      if (!existingColorMap[key] || existingColorMap[key] === GridColor.None) {
-        simState.gridColors[key] = color;
-        positionIndex++;
-        break;
+    if (node.type === 'action') {
+      steps = 1;
+    } else if (node.type === 'loop' && node.count && node.children) {
+      // Repeat loop: body steps * count
+      let bodySteps = 0;
+      for (const child of node.children) {
+        bodySteps += countExpectedSteps(child);
       }
-      positionIndex++;
+      steps = bodySteps * node.count;
+    } else if (node.type === 'while' && node.children) {
+      // While loop: we can't know exact iterations from code tree alone
+      // So we count the body steps (will be executed at least once)
+      // The actual trace steps will be >= this
+      for (const child of node.children) {
+        steps += countExpectedSteps(child);
+      }
+      // Note: actual trace steps will be >= this (could be multiple iterations)
+    } else if (node.type === 'conditional' && node.children && node.children.length > 0) {
+      // Conditional: only one branch executes
+      steps = countExpectedSteps(node.children[0]);
+    } else if (node.children) {
+      // Recursively count children
+      for (const child of node.children) {
+        steps += countExpectedSteps(child);
+      }
     }
+
+    return steps;
+  };
+
+  const expectedSteps = countExpectedSteps(rootNode);
+  const actualSteps = simState.trace.length;
+
+  console.log(`🔍 Validation: Expected minimum steps: ${expectedSteps}, actual trace steps: ${actualSteps}`);
+
+  // For while loops, actual steps can be >= expected (multiple iterations)
+  // So we only warn if actual is significantly less than expected
+  if (actualSteps < expectedSteps - 2) {
+    console.warn(`⚠️  Possible issue: Trace has fewer steps than expected minimum!`);
+    console.warn(`   Expected minimum: ${expectedSteps}, actual: ${actualSteps}`);
+  } else if (actualSteps > expectedSteps + 10) {
+    // Large difference might indicate an issue, but some is expected for while loops
+    console.log(`ℹ️  Trace has more steps than base count (expected for while loops with multiple iterations)`);
   }
 
-  // Fill remaining positions with random colors
-  let coloredCount = Object.keys(existingColorMap).filter(k => existingColorMap[k] !== GridColor.None).length;
-  for (let i = 0; i < allPositions.length && coloredCount < cellsToColor; i++) {
-    const pos = allPositions[i];
-    const key = `${pos.x},${pos.y}`;
-    if (!existingColorMap[key] || existingColorMap[key] === GridColor.None) {
-      const randomColor = allColors[Math.floor(Math.random() * allColors.length)];
-      simState.gridColors[key] = randomColor;
-      coloredCount++;
-    }
-  }
-
-  // Merge back existing colors (these override random colors for logic correctness)
-  Object.assign(simState.gridColors, existingColorMap);
+  // Grid colors were generated first - use them directly
+  // Code generation checked these colors, so they're the source of truth
+  console.log(`🎨 Using pre-generated grid with ${Object.keys(gridColors).length} colored cells`);
 
   return {
     id: levelIndex,
     gridSize: { cols: COLS, rows: ROWS },
     startPos: { x: startX, y: startY },
-    gridColors: simState.gridColors,
+    gridColors: gridColors, // Use the pre-generated grid (source of truth)
     codeTree: rootNode,
     solutionTrace: simState.trace,
     difficulty
   };
 };
+

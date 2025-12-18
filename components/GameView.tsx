@@ -44,8 +44,23 @@ export const GameView: React.FC<GameViewProps> = ({
     resetLevel();
   }, [level.id, resetLevel]);
 
-  // Helper to find conditional or while loop parent of a node
+  // Helper to find conditional, while loop, or repeat loop parent of a node
+  // Returns the innermost (most specific) parent that contains the nodeId
   const findConditionalParent = (nodeId: string, node: CodeNode): CodeNode | null => {
+    // Don't check if this node is the nodeId itself - we're looking for parents
+    if (node.id === nodeId) {
+      return null;
+    }
+
+    // First, recursively search children to find the innermost parent
+    if (node.children) {
+      for (const child of node.children) {
+        const found = findConditionalParent(nodeId, child);
+        if (found) return found; // Return the innermost parent found
+      }
+    }
+
+    // Then check if this node itself is a parent of nodeId
     if (node.type === 'conditional' && node.children) {
       // Check if nodeId is in any branch of the conditional
       const isInConditional = node.children.some(child =>
@@ -64,10 +79,13 @@ export const GameView: React.FC<GameViewProps> = ({
         return node;
       }
     }
-    if (node.children) {
-      for (const child of node.children) {
-        const found = findConditionalParent(nodeId, child);
-        if (found) return found;
+    if (node.type === 'loop' && node.children) {
+      // Check if nodeId is in the repeat loop body
+      const isInLoop = node.children.some(child =>
+        child.id === nodeId || findNodeInTree(nodeId, child)
+      );
+      if (isInLoop) {
+        return node;
       }
     }
     return null;
@@ -82,6 +100,18 @@ export const GameView: React.FC<GameViewProps> = ({
     return false;
   };
 
+  // Helper to find a node by ID and return its action name
+  const findNodeById = (nodeId: string, node: CodeNode): CodeNode | null => {
+    if (node.id === nodeId) return node;
+    if (node.children) {
+      for (const child of node.children) {
+        const found = findNodeById(nodeId, child);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (isError) return;
@@ -94,138 +124,144 @@ export const GameView: React.FC<GameViewProps> = ({
 
       const expectedStep = level.solutionTrace[stepIndex];
 
-      // Check if this step is from a conditional or while loop
+      if (!expectedStep) {
+        // No more steps expected
+        return;
+      }
+
+      // Debug logging
+      const wrappedCursor = wrapPos(cursorPos.x, cursorPos.y, level.gridSize.cols, level.gridSize.rows);
+
+      // Calculate expected position BEFORE executing this step
+      // The trace's expectedX/Y is AFTER execution, so we need to work backwards
+      let expectedBeforeX: number, expectedBeforeY: number;
+      if (stepIndex === 0) {
+        // First step: should be at start position
+        expectedBeforeX = level.startPos.x;
+        expectedBeforeY = level.startPos.y;
+      } else {
+        // Previous step's end position is where we should be before this step
+        const prevStep = level.solutionTrace[stepIndex - 1];
+        expectedBeforeX = prevStep.expectedX;
+        expectedBeforeY = prevStep.expectedY;
+      }
+      const expectedBeforeWrapped = wrapPos(expectedBeforeX, expectedBeforeY, level.gridSize.cols, level.gridSize.rows);
+      const positionMatches = wrappedCursor.x === expectedBeforeWrapped.x && wrappedCursor.y === expectedBeforeWrapped.y;
+
+      // Find the node to get its action name
+      const node = findNodeById(expectedStep.nodeId, level.codeTree);
+      const actionName = node?.type === 'action' ? node.action : node?.type || 'unknown';
+
+      console.log(`Step ${stepIndex}: Expected key=${expectedStep.key}, Pressed key=${e.key}, nodeId=${expectedStep.nodeId}`);
+      console.log(`  Node type: ${node?.type}, action: ${actionName}`);
+      console.log(`  Position BEFORE step: current=(${wrappedCursor.x},${wrappedCursor.y}), expected=(${expectedBeforeWrapped.x},${expectedBeforeWrapped.y}), match=${positionMatches}`);
+      console.log(`  Position AFTER step (from trace): (${expectedStep.expectedX},${expectedStep.expectedY})`);
+
+      // Find the parent control structure (if any)
       const conditionalParent = findConditionalParent(expectedStep.nodeId, level.codeTree);
 
-      if (conditionalParent && conditionalParent.conditionColor) {
-        // This is a conditional or while loop step - verify the color condition
-        const wrappedCursor = wrapPos(cursorPos.x, cursorPos.y, level.gridSize.cols, level.gridSize.rows);
-        const cellKey = `${wrappedCursor.x},${wrappedCursor.y}`;
-        const cellColor = level.gridColors[cellKey] || GridColor.None;
+      if (conditionalParent) {
+        console.log(`  Parent type: ${conditionalParent.type}, conditionColor: ${conditionalParent.conditionColor}`);
+        if (conditionalParent.type === 'loop') {
+          console.log(`  🔁 Repeat loop: count=${conditionalParent.count}, current step in trace`);
+        }
+        // Debug: Show what children the parent has
+        const childActions = conditionalParent.children?.map(c =>
+          c.type === 'action' ? `${c.id}:${c.action}()` : `${c.id}:${c.type}`
+        ) || [];
+        console.log(`  Parent children:`, childActions);
+        console.log(`  Current step nodeId: ${expectedStep.nodeId}, action: ${actionName}`);
 
-        // Map action names to directions
-        const ACTION_TO_DIRECTION: Record<string, string> = {
-          'up': 'ArrowUp',
-          'down': 'ArrowDown',
-          'left': 'ArrowLeft',
-          'right': 'ArrowRight'
-        };
+        // Check if this step should actually be in this parent
+        const shouldBeInParent = conditionalParent.children?.some(c =>
+          c.id === expectedStep.nodeId || findNodeInTree(expectedStep.nodeId, c)
+        );
+        console.log(`  ✅ Step SHOULD be in this parent: ${shouldBeInParent}`);
 
-        if (conditionalParent.type === 'while') {
-          // For while loops, the condition must be true (cell color matches)
-          const conditionMet = cellColor === conditionalParent.conditionColor;
-
-          if (!conditionMet) {
-            // Condition is false, but we're still in the loop - this shouldn't happen in trace
-            // But we'll allow it if the key matches the trace
-            if (e.key === expectedStep.key) {
-              const wrapped = wrapPos(expectedStep.expectedX, expectedStep.expectedY, level.gridSize.cols, level.gridSize.rows);
-              setCursorPos(wrapped);
-              const nextIndex = stepIndex + 1;
-              setStepIndex(nextIndex);
-              if (nextIndex >= level.solutionTrace.length) {
-                setTimeout(() => onComplete(), 300);
-              }
-            } else {
-              setIsError(true);
-              setTimeout(() => resetLevel(), 500);
-            }
-          } else {
-            // Condition is true, verify the action matches
-            const traceExpectedAction = conditionalParent.children?.find(
-              child => child.id === expectedStep.nodeId || findNodeInTree(expectedStep.nodeId, child)
-            );
-            const traceExpectedDirection = traceExpectedAction?.action
-              ? ACTION_TO_DIRECTION[traceExpectedAction.action]
-              : null;
-
-            if (e.key === expectedStep.key && (traceExpectedDirection === null || e.key === traceExpectedDirection)) {
-              const wrapped = wrapPos(expectedStep.expectedX, expectedStep.expectedY, level.gridSize.cols, level.gridSize.rows);
-              setCursorPos(wrapped);
-              const nextIndex = stepIndex + 1;
-              setStepIndex(nextIndex);
-              if (nextIndex >= level.solutionTrace.length) {
-                setTimeout(() => onComplete(), 300);
-              }
-            } else {
-              setIsError(true);
-              setTimeout(() => resetLevel(), 500);
-            }
-          }
-        } else {
-          // This is a conditional (if/else-if/else)
-          const conditionMet = cellColor === conditionalParent.conditionColor;
-
-          // Find which branch the trace expects
-          let traceExpectedBranchIndex = -1;
-          for (let i = 0; i < (conditionalParent.children?.length || 0); i++) {
-            const child = conditionalParent.children![i];
-            if (child.id === expectedStep.nodeId || findNodeInTree(expectedStep.nodeId, child)) {
-              traceExpectedBranchIndex = i;
-              break;
-            }
-          }
-
-          // Determine which branch should be taken based on current cell color
-          // For else-if chains: check each branch color until one matches
-          let expectedBranchIndex = (conditionalParent.children?.length || 1) - 1; // Default to else
-          if (conditionMet) {
-            expectedBranchIndex = 0; // If branch
-          } else {
-            // Check else-if branches (if any)
-            // For simplicity, we'll check if the color matches any of the other branch colors
-            // Since we don't store branch colors explicitly, we'll use the trace expectation
-            expectedBranchIndex = traceExpectedBranchIndex >= 0 ? traceExpectedBranchIndex : expectedBranchIndex;
-          }
-
-          const traceExpectedAction = traceExpectedBranchIndex >= 0
-            ? conditionalParent.children![traceExpectedBranchIndex]
-            : null;
-          const traceExpectedDirection = traceExpectedAction?.action
-            ? ACTION_TO_DIRECTION[traceExpectedAction.action]
-            : null;
-
-          // Verify that the pressed key matches the trace expectation
-          const keyMatchesTrace = e.key === expectedStep.key;
-          const keyMatchesExpectedDirection = traceExpectedDirection ? e.key === traceExpectedDirection : true;
-
-          if (keyMatchesTrace && keyMatchesExpectedDirection) {
-            const wrapped = wrapPos(expectedStep.expectedX, expectedStep.expectedY, level.gridSize.cols, level.gridSize.rows);
-            setCursorPos(wrapped);
-            const nextIndex = stepIndex + 1;
-            setStepIndex(nextIndex);
-            if (nextIndex >= level.solutionTrace.length) {
-              setTimeout(() => onComplete(), 300);
-            }
-          } else {
-            setIsError(true);
-            setTimeout(() => resetLevel(), 500);
-          }
+        if (!shouldBeInParent) {
+          console.log(`  ⚠️  WARNING: Step nodeId ${expectedStep.nodeId} is NOT actually in parent's children!`);
+          console.log(`  This suggests the trace has the wrong nodeId for this step.`);
         }
       } else {
-        // Regular step (not a conditional)
-        if (e.key === expectedStep.key) {
-          // Correct Input
-          // Wrap coordinates to ensure they're in bounds (should already be wrapped, but safety check)
-          const wrapped = wrapPos(expectedStep.expectedX, expectedStep.expectedY, level.gridSize.cols, level.gridSize.rows);
-          setCursorPos(wrapped);
+        console.log(`  No parent control structure found for nodeId=${expectedStep.nodeId}`);
+      }
 
-          const nextIndex = stepIndex + 1;
-          setStepIndex(nextIndex);
+      // Handle while loops - check condition is met
+      if (conditionalParent && conditionalParent.type === 'while' && conditionalParent.conditionColor) {
+        const cellKey = `${wrappedCursor.x},${wrappedCursor.y}`;
+        const cellColor = level.gridColors[cellKey] || GridColor.None;
+        const conditionMet = cellColor === conditionalParent.conditionColor;
 
-          if (nextIndex >= level.solutionTrace.length) {
-            // Level Complete
-            setTimeout(() => {
-              onComplete();
-            }, 300);
-          }
-        } else {
-          // Wrong Input
+        console.log(`  🔄 While loop condition check:`);
+        console.log(`     Current position: (${wrappedCursor.x}, ${wrappedCursor.y})`);
+        console.log(`     Expected position BEFORE step: (${expectedBeforeWrapped.x}, ${expectedBeforeWrapped.y})`);
+        console.log(`     Position matches: ${positionMatches}`);
+        console.log(`     Current cell color: ${cellColor}`);
+        console.log(`     Required color: ${conditionalParent.conditionColor}`);
+        console.log(`     Condition met: ${conditionMet}`);
+        console.log(`     Expected step key: ${expectedStep.key}, nodeId: ${expectedStep.nodeId}`);
+
+        // For while loops, the condition must be met before executing the body
+        // SIMPLIFIED: Just block execution if condition isn't met
+        // The trace should only have steps for when condition IS met
+        if (!conditionMet) {
+          console.log(`  ❌ While loop condition NOT met - blocking execution`);
+          console.log(`     The trace expects this step, but you're on the wrong color.`);
+          console.log(`     This indicates a trace generation issue - the trace should not have steps for when condition is false.`);
           setIsError(true);
           setTimeout(() => {
             resetLevel();
           }, 500);
+          return;
         }
+        console.log(`  ✅ While loop condition met - allowing execution`);
+      }
+
+      // Validate the key matches the expected step
+      // This works for: regular actions, repeat loops (no condition check needed),
+      // while loops (condition already checked above), and conditionals
+      if (e.key !== expectedStep.key) {
+        // Wrong Input
+        console.log(`  ❌ Key mismatch! Expected ${expectedStep.key}, got ${e.key} for nodeId=${expectedStep.nodeId}`);
+        console.log(`  📋 Full trace context:`);
+        const start = Math.max(0, stepIndex - 3);
+        const end = Math.min(level.solutionTrace.length, stepIndex + 3);
+        console.log(`  Surrounding trace steps (${start}-${end-1}):`);
+        for (let i = start; i < end; i++) {
+          const step = level.solutionTrace[i];
+          const stepNode = findNodeById(step.nodeId, level.codeTree);
+          const stepAction = stepNode?.type === 'action' ? stepNode.action : stepNode?.type || 'unknown';
+          const marker = i === stepIndex ? '👉' : '  ';
+          console.log(`${marker} Step ${i}: key=${step.key}, nodeId=${step.nodeId}, action=${stepAction}, pos=(${step.expectedX},${step.expectedY})`);
+        }
+        if (conditionalParent && conditionalParent.type === 'loop') {
+          console.log(`  🔁 This was from a repeat loop (count=${conditionalParent.count})`);
+        }
+        // Check if this might be a missing trace step issue
+        if (!conditionalParent && actionName === 'down') {
+          console.log(`  ⚠️  This is a standalone 'down()' action with no parent - check if trace step exists`);
+        }
+        setIsError(true);
+        setTimeout(() => {
+          resetLevel();
+        }, 500);
+        return;
+      }
+
+      console.log(`  ✅ Key matches - proceeding`);
+
+      // Correct Input - update position and advance to next step
+      const wrapped = wrapPos(expectedStep.expectedX, expectedStep.expectedY, level.gridSize.cols, level.gridSize.rows);
+      setCursorPos(wrapped);
+
+      const nextIndex = stepIndex + 1;
+      setStepIndex(nextIndex);
+
+      if (nextIndex >= level.solutionTrace.length) {
+        // Level Complete
+        setTimeout(() => {
+          onComplete();
+        }, 300);
       }
     },
     [level, stepIndex, isError, onComplete, resetLevel, cursorPos]
@@ -240,6 +276,20 @@ export const GameView: React.FC<GameViewProps> = ({
   // The trace step contains the node ID that *generated* that move.
   // If we are waiting for step 0, we highlight trace[0].nodeId.
   const activeNodeId = level.solutionTrace[stepIndex]?.nodeId || null;
+
+  // Determine last executed node (the previous step that was just completed)
+  // This helps learners find their place in the code
+  // stepIndex points to the NEXT step to execute, so stepIndex - 1 is the last completed step
+  const lastExecutedNodeId = stepIndex > 0 && level.solutionTrace[stepIndex - 1]
+    ? level.solutionTrace[stepIndex - 1].nodeId
+    : null;
+
+  // Debug logging to help diagnose highlighting issues
+  useEffect(() => {
+    if (lastExecutedNodeId) {
+      console.log(`📍 Last executed node: ${lastExecutedNodeId}, stepIndex: ${stepIndex}, activeNodeId: ${activeNodeId}`);
+    }
+  }, [lastExecutedNodeId, stepIndex, activeNodeId]);
 
   // Track manual scrolling to prevent auto-scroll interference
   useEffect(() => {
@@ -342,7 +392,7 @@ export const GameView: React.FC<GameViewProps> = ({
             className="flex-1 overflow-y-auto min-h-0 scroll-smooth"
             style={{ scrollBehavior: 'smooth' }}
           >
-            <CodeDisplay node={level.codeTree} activeNodeId={activeNodeId} />
+            <CodeDisplay node={level.codeTree} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} />
           </div>
 
         </div>

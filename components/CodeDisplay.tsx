@@ -1,9 +1,13 @@
 import React from 'react';
 import { CodeNode, GridColor } from '../types';
 
+// Toggle this to switch between testing/staging and production styles
+const USE_TRACING_STYLES = false; // Set to false for production
+
 interface CodeDisplayProps {
   node: CodeNode;
   activeNodeId: string | null;
+  lastExecutedNodeId?: string | null;
   depth?: number;
 }
 
@@ -19,9 +23,10 @@ const ColorBadge = ({ color }: { color: GridColor }) => {
     );
 };
 
-export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, depth = 0 }) => {
+export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, lastExecutedNodeId = null, depth = 0 }) => {
   const indent = depth * 20; // Increased indentation for better readability
   const isActive = node.id === activeNodeId;
+  const isLastExecuted = node.id === lastExecutedNodeId;
 
   if (node.type === 'root') {
     return (
@@ -35,7 +40,7 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
         style={{ fontSize: '1.25rem' }}
       >
         {node.children?.map(child => (
-          <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} depth={0} />
+          <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={0} />
         ))}
       </div>
     );
@@ -48,14 +53,30 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
         className={`
           relative my-0.5 px-2 py-0.5 rounded
           transition-all duration-200
-          ${isActive ? '' : 'hover:bg-slate-50'}
+          ${isActive ? '' : isLastExecuted ? 'bg-blue-50 border-l-2 border-blue-400' : 'hover:bg-slate-50'}
           `}
         //   ${isActive ? 'bg-amber-200 text-amber-900 font-bold shadow-sm translate-x-1' : 'hover:bg-slate-50'}
         style={{ marginLeft: indent }}
       >
         {/* <span className={isActive ? 'text-amber-800' : 'text-blue-600'}>{node.action}</span> */}
-        <span className={isActive ? 'text-green-800' : 'text-blue-700'}>{node.action}</span>
+
+        <span
+          className={
+            USE_TRACING_STYLES
+              ? isActive ? 'text-green-500 font-bold' : isLastExecuted ? 'text-blue-600 font-semibold' : 'text-blue-200'
+              : isLastExecuted ? 'text-blue-600 font-semibold' : 'text-blue-500'
+          }
+          style={
+            USE_TRACING_STYLES
+              ? isActive ? { fontSize: '2.25rem' } : { fontSize: '1.25rem' }
+              : { fontSize: '1.25rem' }
+          }
+        >
+          {node.action}
+        </span>
+
         <span className="text-slate-400">();</span>
+
       </div>
     );
   }
@@ -106,7 +127,7 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
 
         <div className="border-l-2 border-slate-100 ml-3 pl-1 group-hover:border-slate-200 transition-colors">
           {node.children?.map(child => (
-            <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} depth={depth + 1} />
+            <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={depth + 1} />
           ))}
         </div>
 
@@ -157,7 +178,7 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
         </div>
 
         <div className="border-l-2 border-slate-100 ml-3 pl-1 group-hover:border-slate-200 transition-colors">
-          <CodeDisplay node={node.children![0]} activeNodeId={activeNodeId} depth={depth + 1} />
+          <CodeDisplay node={node.children![0]} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={depth + 1} />
         </div>
 
         {/* Else-if branches */}
@@ -177,7 +198,7 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
                 <span className="text-slate-500">{'{'}</span>
               </div>
               <div className="border-l-2 border-slate-100 ml-3 pl-1 group-hover:border-slate-200 transition-colors">
-                <CodeDisplay node={child} activeNodeId={activeNodeId} depth={depth + 1} />
+                <CodeDisplay node={child} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={depth + 1} />
               </div>
             </React.Fragment>
           );
@@ -190,7 +211,7 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
               {'}'} <span className="text-purple-700">else</span> <span className="text-slate-500">{'{'}</span>
             </div>
             <div className="border-l-2 border-slate-100 ml-3 pl-1 group-hover:border-slate-200 transition-colors">
-              <CodeDisplay node={node.children![numBranches - 1]} activeNodeId={activeNodeId} depth={depth + 1} />
+              <CodeDisplay node={node.children![numBranches - 1]} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={depth + 1} />
             </div>
           </>
         )}
