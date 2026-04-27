@@ -14,15 +14,18 @@ export interface GridCell {
   color: GridColor;
 }
 
-export type CodeNodeType = 'root' | 'loop' | 'conditional' | 'action';
+export type CodeNodeType = 'root' | 'loop' | 'while' | 'conditional' | 'action';
 
 export interface CodeNode {
   id: string;
   type: CodeNodeType;
   action?: string; // 'right', 'up', etc.
-  count?: number; // for loops
-  conditionColor?: GridColor; // for conditionals
+  count?: number; // for repeat loops
+  conditionColor?: GridColor; // for conditionals and while loops
   children?: CodeNode[];
+  // For conditionals with else-if chains: each child represents a branch
+  // [0] = if branch, [1] = else-if branch, [2] = else-if branch, etc., [last] = else branch
+  // For while loops: children are the loop body
 }
 
 export interface TraceStep {

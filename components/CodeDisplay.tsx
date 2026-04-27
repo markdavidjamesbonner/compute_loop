@@ -1,9 +1,13 @@
 import React from 'react';
 import { CodeNode, GridColor } from '../types';
 
+// Toggle this to switch between testing/staging and production styles
+const USE_TRACING_STYLES = false; // Set to false for production
+
 interface CodeDisplayProps {
   node: CodeNode;
   activeNodeId: string | null;
+  lastExecutedNodeId?: string | null;
   depth?: number;
 }
 
@@ -19,15 +23,24 @@ const ColorBadge = ({ color }: { color: GridColor }) => {
     );
 };
 
-export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, depth = 0 }) => {
+export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, lastExecutedNodeId = null, depth = 0 }) => {
   const indent = depth * 20; // Increased indentation for better readability
   const isActive = node.id === activeNodeId;
+  const isLastExecuted = node.id === lastExecutedNodeId;
 
   if (node.type === 'root') {
     return (
-      <div className="font-code text-sm sm:text-base leading-relaxed text-slate-700">
+    //   <div className="font-code text-sm sm:text-base leading-relaxed text-slate-700">
+    //     {node.children?.map(child => (
+    //       <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} depth={0} />
+    //     ))}
+    //   </div>
+      <div
+        className="font-code text-xl leading-relaxed text-slate-900"
+        style={{ fontSize: '1.25rem' }}
+      >
         {node.children?.map(child => (
-          <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} depth={0} />
+          <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={0} />
         ))}
       </div>
     );
@@ -36,17 +49,34 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
   if (node.type === 'action') {
     return (
       <div
+        data-node-id={node.id}
         className={`
           relative my-0.5 px-2 py-0.5 rounded
           transition-all duration-200
-          ${isActive ? '' : 'hover:bg-slate-50'}
+          ${isActive ? '' : isLastExecuted ? 'bg-blue-50 border-l-2 border-blue-400' : 'hover:bg-slate-50'}
           `}
         //   ${isActive ? 'bg-amber-200 text-amber-900 font-bold shadow-sm translate-x-1' : 'hover:bg-slate-50'}
         style={{ marginLeft: indent }}
       >
         {/* <span className={isActive ? 'text-amber-800' : 'text-blue-600'}>{node.action}</span> */}
-        <span className={isActive ? 'text-green-800' : 'text-blue-700'}>{node.action}</span>
+
+        <span
+          className={
+            USE_TRACING_STYLES
+              ? isActive ? 'text-green-500 font-bold' : isLastExecuted ? 'text-blue-600 font-semibold' : 'text-blue-200'
+              : isLastExecuted ? 'text-blue-600 font-semibold' : 'text-blue-500'
+          }
+          style={
+            USE_TRACING_STYLES
+              ? isActive ? { fontSize: '2.25rem' } : { fontSize: '1.25rem' }
+              : { fontSize: '1.25rem' }
+          }
+        >
+          {node.action}
+        </span>
+
         <span className="text-slate-400">();</span>
+
       </div>
     );
   }
@@ -55,7 +85,6 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
   // or we might want to highlight the loop header when entering it.
   // For now, we only highlight actions, but we could highlight the wrapper).
   if (node.type === 'loop') {
-
     return (
       <div className="my-1 group">
         <div
@@ -80,39 +109,115 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({ node, activeNodeId, de
     );
   }
 
-  if (node.type === 'conditional') {
+  if (node.type === 'while') {
     return (
-        <div className="my-1 group">
-            <div
-              style={{ marginLeft: indent }}
-              className="text-purple-700 font-semibold flex items-center"
-            >
-                <span>if</span>
+      <div className="my-1 group">
+        <div
+          style={{ marginLeft: indent }}
+          className="text-purple-700 font-semibold flex items-center"
+        >
+          <span>while</span>
+          <span className="text-slate-500 mx-1">(</span>
+          <span className="bg-white px-1 py-0.5 rounded border border-slate-200 flex items-center">
+            <ColorBadge color={node.conditionColor || GridColor.None} />
+          </span>
+          <span className="text-slate-500 mx-1">)</span>
+          <span className="text-slate-500">{'{'}</span>
+        </div>
+
+        <div className="border-l-2 border-slate-100 ml-3 pl-1 group-hover:border-slate-200 transition-colors">
+          {node.children?.map(child => (
+            <CodeDisplay key={child.id} node={child} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={depth + 1} />
+          ))}
+        </div>
+
+        <div style={{ marginLeft: indent }} className="text-slate-500 font-semibold">{'}'}</div>
+      </div>
+    );
+  }
+
+  if (node.type === 'conditional') {
+    const numBranches = node.children?.length || 0;
+    const hasElseIf = numBranches > 2;
+
+    // For else-if chains, determine colors for each branch
+    // The first branch uses conditionColor, else-if branches use different colors
+    // The last branch (else) doesn't have a color condition
+    const allColors = [GridColor.Red, GridColor.Blue, GridColor.Yellow, GridColor.Green];
+    const getBranchColor = (index: number): GridColor | null => {
+      if (index === 0) {
+        // First branch: if condition
+        return node.conditionColor || GridColor.None;
+      }
+      if (index < numBranches - 1) {
+        // Middle branches: else-if conditions
+        const usedColors = [node.conditionColor].filter(c => c !== undefined && c !== GridColor.None) as GridColor[];
+        const availableColors = allColors.filter(c => !usedColors.includes(c));
+        // Use different colors for each else-if branch
+        const colorIndex = (index - 1) % availableColors.length;
+        return availableColors[colorIndex];
+      }
+      // Last branch: else (no color condition)
+      return null;
+    };
+
+    return (
+      <div className="my-1 group">
+        {/* If branch */}
+        <div
+          style={{ marginLeft: indent }}
+          className="text-purple-700 font-semibold flex items-center"
+        >
+          <span>if</span>
+          <span className="text-slate-500 mx-1">(</span>
+          <span className="bg-white px-1 py-0.5 rounded border border-slate-200 flex items-center">
+            <ColorBadge color={getBranchColor(0)} />
+          </span>
+          <span className="text-slate-500 mx-1">)</span>
+          <span className="text-slate-500">{'{'}</span>
+        </div>
+
+        <div className="border-l-2 border-slate-100 ml-3 pl-1 group-hover:border-slate-200 transition-colors">
+          <CodeDisplay node={node.children![0]} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={depth + 1} />
+        </div>
+
+        {/* Else-if branches */}
+        {hasElseIf && node.children!.slice(1, -1).map((child, idx) => {
+          const branchColor = getBranchColor(idx + 1);
+          return (
+            <React.Fragment key={child.id}>
+              <div style={{ marginLeft: indent }} className="text-purple-700 font-semibold mt-0.5 flex items-center">
+                {'}'} <span className="text-purple-700">else if</span>
                 <span className="text-slate-500 mx-1">(</span>
-                <span className="bg-white px-1 py-0.5 rounded border border-slate-200 flex items-center">
-                   is <ColorBadge color={node.conditionColor || GridColor.None} />
-                </span>
+                {branchColor && (
+                  <span className="bg-white px-1 py-0.5 rounded border border-slate-200 flex items-center">
+                    <ColorBadge color={branchColor} />
+                  </span>
+                )}
                 <span className="text-slate-500 mx-1">)</span>
                 <span className="text-slate-500">{'{'}</span>
-            </div>
+              </div>
+              <div className="border-l-2 border-slate-100 ml-3 pl-1 group-hover:border-slate-200 transition-colors">
+                <CodeDisplay node={child} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={depth + 1} />
+              </div>
+            </React.Fragment>
+          );
+        })}
 
+        {/* Else branch (last child) */}
+        {node.children![numBranches - 1] && (
+          <>
+            <div style={{ marginLeft: indent }} className="text-purple-700 font-semibold mt-0.5">
+              {'}'} <span className="text-purple-700">else</span> <span className="text-slate-500">{'{'}</span>
+            </div>
             <div className="border-l-2 border-slate-100 ml-3 pl-1 group-hover:border-slate-200 transition-colors">
-                {/* True Branch */}
-                <CodeDisplay node={node.children![0]} activeNodeId={activeNodeId} depth={depth + 1} />
+              <CodeDisplay node={node.children![numBranches - 1]} activeNodeId={activeNodeId} lastExecutedNodeId={lastExecutedNodeId} depth={depth + 1} />
             </div>
+          </>
+        )}
 
-            {node.children![1] && (
-                 <>
-                    <div style={{ marginLeft: indent }} className="text-purple-700 font-semibold mt-0.5">
-                      {'}'} <span className="text-purple-700">else</span> <span className="text-slate-500">{'{'}</span>
-                    </div>
-                    <div className="border-l-2 border-slate-100 ml-3 pl-1 group-hover:border-slate-200 transition-colors">
-                      <CodeDisplay node={node.children![1]} activeNodeId={activeNodeId} depth={depth + 1} />
-                    </div>
-                 </>
-            )}
-             <div style={{ marginLeft: indent }} className="text-slate-500 font-semibold">{'}'}</div>
-        </div>
+        <div style={{ marginLeft: indent }} className="text-slate-500 font-semibold">{'}'}</div>
+      </div>
     );
   }
 
